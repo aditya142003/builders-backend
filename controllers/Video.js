@@ -85,6 +85,33 @@ async function getImageLocation(imagePath) {
   }
 }
 
+async function getImageLocationFromLatLong(lat, long) {
+  const location = {
+    latitude: lat,
+    longitude: long,
+    detail: "No details",
+  };
+  if (lat && long) {
+    const latitudeDecimal = await convertDMSToDD(lat, 0, 0, undefined);
+    const longitudeDecimal = await convertDMSToDD(long, 0, 0, undefined);
+
+    location.latitude = latitudeDecimal.toFixed(6);
+    location.longitude = longitudeDecimal.toFixed(6);
+
+    const apiKey = "9f718b3bd71341beadabc3cda202e1f9";
+    const response = await fetch(
+      `https://api.opencagedata.com/geocode/v1/json?key=${apiKey}&q=${latitudeDecimal},${longitudeDecimal}`
+    );
+    const data = await response.json();
+
+    if (data.results && data.results.length > 0) {
+      location.detail = data.results[0];
+    }
+  }
+
+  return location;
+}
+
 async function extractScreenshot(sourcePath) {
   return new Promise((resolve, reject) => {
     ffmpeg({ source: sourcePath })
@@ -106,11 +133,17 @@ async function extractScreenshot(sourcePath) {
 }
 
 export const createVideo = async (req, res, next) => {
-  let { imageUrl, type } = req.body;
+  let { imageUrl, type, lat, long } = req.body;
   imageUrl = JSON.parse(imageUrl);
   type = JSON.parse(type);
+  let location;
+  if (lat && long) {
+    lat = JSON.parse(lat);
+    long = JSON.parse(long);
+    location = await getImageLocationFromLatLong(lat, long);
+  }
   if (type == "image") {
-    let location = await getImageLocation(req.file.path);
+    location = await getImageLocation(req.file.path);
     fs.unlinkSync(req.file.path);
 
     if (!imageUrl) {
@@ -210,9 +243,9 @@ export const createVideo = async (req, res, next) => {
         Mobile,
         CompAddress,
         Website,
-        longitude: 0,
-        latitude: 0,
-        address: null,
+        longitude: lat,
+        latitude: long,
+        address: location.detail.formatted,
       });
 
       res.status(201).json({
