@@ -4,12 +4,12 @@ const videoSchema = new mongoose.Schema(
   {
     imageUrl: {
       type: String,
-      // required:true,
+      default: null,
     },
-    // videoUrl:{
-    //     type:String,
-    //     // required:true,
-    // },
+    videoUrl: {
+      type: String,
+      default: null,
+    },
     Services: {
       type: String,
     },

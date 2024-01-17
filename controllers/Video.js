@@ -5,6 +5,9 @@ import fs2 from "fs/promises";
 import axios from "axios";
 import exifr from "exifr";
 import fetch from "node-fetch";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // Access your API key as an environment variable (see "Set up your API key" above)
 const genAI = new GoogleGenerativeAI("AIzaSyBSddIGO1UIl-QxLWDWmNrXXaYAbVaRHyE");
@@ -82,64 +85,144 @@ async function getImageLocation(imagePath) {
   }
 }
 
+async function extractScreenshot(sourcePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg({ source: sourcePath })
+      .on("end", () => {
+        resolve();
+      })
+      .on("error", (err) => {
+        console.error(err);
+        reject(err);
+      })
+      .takeScreenshots(
+        {
+          filename: "test.jpg",
+          timemarks: [1],
+        },
+        "uploads"
+      );
+  });
+}
+
 export const createVideo = async (req, res, next) => {
-  let { imageUrl } = req.body;
+  let { imageUrl, type } = req.body;
   imageUrl = JSON.parse(imageUrl);
+  type = JSON.parse(type);
+  if (type == "image") {
+    let location = await getImageLocation(req.file.path);
+    fs.unlinkSync(req.file.path);
 
-  let location = await getImageLocation(req.file.path);
-  fs.unlinkSync(req.file.path);
+    if (!imageUrl) {
+      res.status(400);
+      return next(new Error("imgUrl required"));
+    }
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
 
-  if (!imageUrl) {
-    res.status(400);
-    return next(new Error("imgUrl required"));
-  }
-  try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
+      const prompt =
+        "Answer the following questions only 2 - 3 word answers for each question and if some detail is not provided than send null and apply break line after every answer: 1) What are the services provided by the company?, 2) What is the company name? 3) What is the phone number? 4)What is the address of the company mentioned? 5)What is the website of the company as mentioned in text, website ends with .com? 6) Is the majority of the text displayed on a card or vehicle or poster or construction site?";
 
-    const prompt =
-      "Answer the following questions only 2 - 3 word answers for each question and if some detail is not provided than send null and apply break line after every answer: 1) What are the services provided by the company?, 2) What is the company name? 3) What is the phone number? 4)What is the address of the company mentioned? 5)What is the website of the company as mentioned in text, website ends with .com? 6) Is the majority of the text displayed on a card or vehicle or poster or construction site?";
+      const imagePart = await fileToGenerativePart(imageUrl, "image/jpeg"); // Use the imageUrl from the request
 
-    const imagePart = await fileToGenerativePart(imageUrl, "image/jpeg"); // Use the imageUrl from the request
+      const result = await model.generateContent([prompt, imagePart]);
+      const response = await result.response;
+      const text = response.text();
+      console.log(text);
+      // Split the text into three statements
+      const statements = text.split("\n").map((statement) => statement.trim());
 
-    const result = await model.generateContent([prompt, imagePart]);
-    const response = await result.response;
-    const text = response.text();
-    console.log(text);
-    // Split the text into three statements
-    const statements = text.split("\n").map((statement) => statement.trim());
+      // Remove statement numbers and format the output
+      const [Services, Name, Mobile, CompAddress, Website, Type] =
+        statements.map(
+          (statement) =>
+            statement
+              .replace(/^\d+\)\s/, "") // Remove statement number and trailing space
+              .replace(/\.$/, "") // Remove trailing period
+              .trim() // Trim any extra spaces
+        );
+      // console.log(Type);
 
-    // Remove statement numbers and format the output
-    const [Services, Name, Mobile, CompAddress, Website, Type] = statements.map(
-      (statement) =>
-        statement
-          .replace(/^\d+\)\s/, "") // Remove statement number and trailing space
-          .replace(/\.$/, "") // Remove trailing period
-          .trim() // Trim any extra spaces
-    );
-    // console.log(Type);
+      // Your existing Video creation logic here
+      const video = await Video.create({
+        imageUrl,
+        Type,
+        Services,
+        Name,
+        Mobile,
+        CompAddress,
+        Website,
+        longitude: location.longitude,
+        latitude: location.latitude,
+        address: location.detail.formatted,
+      });
+      // console.log(imageUrl);
+      // console.log(videoUrl);
+      res.status(201).json({
+        message: "success",
+      });
+    } catch (error) {
+      console.log(error);
+      res.status(500);
+      next(error);
+    }
+  } else {
+    await extractScreenshot(req.file.path);
+    fs.unlinkSync(req.file.path);
 
-    // Your existing Video creation logic here
-    const video = await Video.create({
-      imageUrl,
-      Type,
-      Services,
-      Name,
-      Mobile,
-      CompAddress,
-      Website,
-      longitude: location.longitude,
-      latitude: location.latitude,
-      address: location.detail.formatted,
-    });
-    // console.log(imageUrl);
-    // console.log(videoUrl);
-    res.status(201).json({
-      message: "success",
-    });
-  } catch (error) {
-    console.log(error);
-    res.status(500);
-    next(error);
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
+
+      const prompt =
+        "Answer the following questions only 2 - 3 word answers for each question and if some detail is not provided than send null and apply break line after every answer: 1) What are the services provided by the company?, 2) What is the company name? 3) What is the phone number? 4)What is the address of the company mentioned? 5)What is the website of the company as mentioned in text, website ends with .com? 6) Is the majority of the text displayed on a card or vehicle or poster or construction site?";
+
+      const imagePart = await fileToGenerativePart(
+        "./uploads/test.jpg",
+        "image/jpeg"
+      ); // Use the imageUrl from the request
+
+      const result = await model.generateContent([prompt, imagePart]);
+      const response = await result.response;
+      const text = response.text();
+      console.log(text);
+      fs.unlinkSync("./uploads/test.jpg");
+
+      // Split the text into three statements
+      const statements = text.split("\n").map((statement) => statement.trim());
+
+      // Remove statement numbers and format the output
+      const [Services, Name, Mobile, CompAddress, Website, Type] =
+        statements.map(
+          (statement) =>
+            statement
+              .replace(/^\d+\)\s/, "") // Remove statement number and trailing space
+              .replace(/\.$/, "") // Remove trailing period
+              .trim() // Trim any extra spaces
+        );
+      // console.log(Type);
+
+      // Your existing Video creation logic here
+      const video = await Video.create({
+        videoUrl: imageUrl,
+        Type,
+        Services,
+        Name,
+        Mobile,
+        CompAddress,
+        Website,
+        longitude: 0,
+        latitude: 0,
+        address: null,
+      });
+
+      res.status(201).json({
+        message: "success",
+      });
+    } catch (error) {
+      console.log(error);
+      res.status(500);
+      next(error);
+    }
   }
 };
 
