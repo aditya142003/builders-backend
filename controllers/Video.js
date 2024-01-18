@@ -243,9 +243,9 @@ export const createVideo = async (req, res, next) => {
         Mobile,
         CompAddress,
         Website,
-        longitude: lat,
-        latitude: long,
-        address: location.detail.formatted,
+        longitude: long ? long : 0,
+        latitude: lat ? lat : 0,
+        address: location?.detail?.formatted ? location.detail.formatted : null,
       });
 
       res.status(201).json({
